@@ -2,10 +2,8 @@
 #  ONE FASTAPI BACKEND FOR SINHALA + TAMIL EMOTION + TTS
 ###############################################################
 
-
 import os
 import re
-import json
 import emoji
 import torch
 from uuid import uuid4
@@ -26,7 +24,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ============================================
-# COMMON CLEAN TEXT FUNCTION
+# CLEAN TEXT
 # ============================================
 def clean_text(text: str, lang: str):
     text = emoji.demojize(str(text))
@@ -39,9 +37,9 @@ def clean_text(text: str, lang: str):
 
     return re.sub(r"\s+", " ", text).strip()
 
-# ================================================================
+# ============================================
 # CONSTANTS
-# ================================================================
+# ============================================
 SINHALA_MODEL_DIR = "jithara/sinbert_sinhala_best"
 TAMIL_MODEL_DIR = "jithara/best_emotion_model"
 
@@ -54,9 +52,9 @@ TAMIL_TTS_DIR = "tts_outputs"
 os.makedirs(SINHALA_TTS_DIR, exist_ok=True)
 os.makedirs(TAMIL_TTS_DIR, exist_ok=True)
 
-# ================================================================
-# GLOBAL MODEL HOLDERS (LAZY LOADING)
-# ================================================================
+# ============================================
+# GLOBAL MODELS
+# ============================================
 si_tokenizer = None
 si_model = None
 ta_tokenizer = None
@@ -64,9 +62,9 @@ ta_model = None
 si_id2label = None
 ta_id2label = None
 
-# ================================================================
-# LAZY MODEL LOADER (FIXED ✅)
-# ================================================================
+# ============================================
+# 🔥 MODEL LOADER (UNCHANGED LOGIC)
+# ============================================
 def load_models():
     global si_tokenizer, si_model, ta_tokenizer, ta_model, si_id2label, ta_id2label
 
@@ -76,8 +74,6 @@ def load_models():
         si_model = AutoModelForSequenceClassification.from_pretrained(
             SINHALA_MODEL_DIR
         ).to(DEVICE).eval()
-
-        # ✅ FIX: use model config (NOT file access)
         si_id2label = si_model.config.id2label
 
     if ta_model is None:
@@ -86,12 +82,11 @@ def load_models():
         ta_model = AutoModelForSequenceClassification.from_pretrained(
             TAMIL_MODEL_DIR
         ).to(DEVICE).eval()
-
         ta_id2label = ta_model.config.id2label
 
-# ================================================================
+# ============================================
 # EMOTION META (UNCHANGED)
-# ================================================================
+# ============================================
 SI_EMOTION_META = {
     "happy": {
         "voice_affect": "Warm, cheerful, bright emotional color with genuine joy and a natural smile in the voice",
@@ -145,25 +140,21 @@ SI_EMOTION_META = {
 
 TA_EMOTION_META = SI_EMOTION_META
 
-# ================================================================
-# PREDICT EMOTION (UNCHANGED LOGIC)
-# ================================================================
+# ============================================
+# EMOTION PREDICT (UNCHANGED)
+# ============================================
 def predict_emotion(text, lang):
     load_models()
     cleaned = clean_text(text, lang)
 
     if lang == "si":
-        tokenizer = si_tokenizer
-        model = si_model
-        max_len = SINHALA_MAX_LEN
-        label_map = si_id2label
-        meta_map = SI_EMOTION_META
+        tokenizer, model, max_len, label_map, meta_map = (
+            si_tokenizer, si_model, SINHALA_MAX_LEN, si_id2label, SI_EMOTION_META
+        )
     else:
-        tokenizer = ta_tokenizer
-        model = ta_model
-        max_len = TAMIL_MAX_LEN
-        label_map = ta_id2label
-        meta_map = TA_EMOTION_META
+        tokenizer, model, max_len, label_map, meta_map = (
+            ta_tokenizer, ta_model, TAMIL_MAX_LEN, ta_id2label, TA_EMOTION_META
+        )
 
     enc = tokenizer(
         cleaned,
@@ -180,32 +171,26 @@ def predict_emotion(text, lang):
         ).logits
 
     pred_id = torch.argmax(logits, dim=1).item()
+    raw = label_map[pred_id].strip().lower()
 
-    raw_emotion = label_map[pred_id] if isinstance(label_map, dict) else label_map[pred_id]
-    raw_emotion = raw_emotion.strip().lower()
-
-    emotion_key_map = {
-        "anger": "anger",
-        "ang": "anger",
+    emotion_map = {
+        "anger": "anger", "ang": "anger",
         "fear": "fear",
-        "sadness": "sad",
-        "sad": "sad",
-        "happ": "happy",
-        "happy": "happy",
+        "sad": "sad", "sadness": "sad",
+        "happy": "happy", "happ": "happy",
         "surprise": "surprise",
         "neutral": "neutral"
     }
 
-    emotion = emotion_key_map.get(raw_emotion, "neutral")
+    emotion = emotion_map.get(raw, "neutral")
     meta = meta_map[emotion]
     meta["emotion_name"] = emotion
 
     return {"text": text, "emotion": emotion, **meta}
 
-
-# ================================================================
+# ============================================
 # TTS (UNCHANGED)
-# ================================================================
+# ============================================
 def generate_tts(text, meta, lang):
     instructions = (
         f"Affect: {meta['voice_affect']}\n"
@@ -232,10 +217,9 @@ def generate_tts(text, meta, lang):
 
     return filename
 
-
-# ================================================================
+# ============================================
 # ROUTES (UNCHANGED)
-# ================================================================
+# ============================================
 router = APIRouter()
 
 @router.post("/sinhala/predict-emotion")
