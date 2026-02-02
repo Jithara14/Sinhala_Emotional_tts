@@ -67,27 +67,39 @@ ta_id2label = None
 # ================================================================
 # LAZY MODEL LOADER (FIXED ✅)
 # ================================================================
-def load_models():
+def load_models(lang: str):
     global si_tokenizer, si_model, ta_tokenizer, ta_model, si_id2label, ta_id2label
 
-    if si_model is None:
-        print("📌 Loading Sinhala model...")
-        si_tokenizer = AutoTokenizer.from_pretrained(SINHALA_MODEL_DIR)
-        si_model = AutoModelForSequenceClassification.from_pretrained(
-            SINHALA_MODEL_DIR
-        ).to(DEVICE).eval()
+    if lang == "si":
+        if si_model is None:
+            print("📌 Loading Sinhala model...")
+            si_tokenizer = AutoTokenizer.from_pretrained(SINHALA_MODEL_DIR)
+            si_model = AutoModelForSequenceClassification.from_pretrained(
+                SINHALA_MODEL_DIR
+            ).to(DEVICE).eval()
+            si_id2label = si_model.config.id2label
 
-        # ✅ FIX: use model config (NOT file access)
-        si_id2label = si_model.config.id2label
+        # 🔥 FREE Tamil model
+        ta_model = None
+        ta_tokenizer = None
+        ta_id2label = None
+        torch.cuda.empty_cache()
 
-    if ta_model is None:
-        print("📌 Loading Tamil model...")
-        ta_tokenizer = AutoTokenizer.from_pretrained(TAMIL_MODEL_DIR)
-        ta_model = AutoModelForSequenceClassification.from_pretrained(
-            TAMIL_MODEL_DIR
-        ).to(DEVICE).eval()
+    else:
+        if ta_model is None:
+            print("📌 Loading Tamil model...")
+            ta_tokenizer = AutoTokenizer.from_pretrained(TAMIL_MODEL_DIR)
+            ta_model = AutoModelForSequenceClassification.from_pretrained(
+                TAMIL_MODEL_DIR
+            ).to(DEVICE).eval()
+            ta_id2label = ta_model.config.id2label
 
-        ta_id2label = ta_model.config.id2label
+        # 🔥 FREE Sinhala model
+        si_model = None
+        si_tokenizer = None
+        si_id2label = None
+        torch.cuda.empty_cache()
+
 
 # ================================================================
 # EMOTION META (UNCHANGED)
@@ -149,7 +161,7 @@ TA_EMOTION_META = SI_EMOTION_META
 # PREDICT EMOTION (UNCHANGED LOGIC)
 # ================================================================
 def predict_emotion(text, lang):
-    load_models()
+    load_models(lang)   # ✅ FIX HERE
     cleaned = clean_text(text, lang)
 
     if lang == "si":
@@ -164,6 +176,8 @@ def predict_emotion(text, lang):
         max_len = TAMIL_MAX_LEN
         label_map = ta_id2label
         meta_map = TA_EMOTION_META
+    
+
 
     enc = tokenizer(
         cleaned,
@@ -225,12 +239,17 @@ def generate_tts(text, meta, lang):
 
     filename = f"{uuid4().hex}.wav"
     folder = SINHALA_TTS_DIR if lang == "si" else TAMIL_TTS_DIR
+
+    # ✅ CRITICAL FIX
+    os.makedirs(folder, exist_ok=True)
+
     path = os.path.join(folder, filename)
 
     with open(path, "wb") as f:
         f.write(response.read())
 
     return filename
+
 
 
 # ================================================================
