@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# IMPORT ROUTER + MODEL LOADER
+# IMPORT MODULE ROUTERS
 from modules.sinta_emotional_tts import router as sinta_emotional_tts_router
-from modules.sinta_emotional_tts import load_models
 
 # ============================================================
 # FASTAPI APP
@@ -19,22 +18,13 @@ app = FastAPI(
 # ============================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # OK for research/demo
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ============================================================
-# 🔥 STARTUP WARM-UP (CRITICAL FIX FOR 502)
-# ============================================================
-@app.on_event("startup")
-def warmup():
-    print("🔥 Warming up emotion models...")
-    load_models()
-    print("✅ Models ready")
-
-# ============================================================
-# ROOT
+# ROOT ROUTE (IMPORTANT FOR RENDER)
 # ============================================================
 @app.get("/")
 def root():
@@ -45,13 +35,13 @@ def root():
     }
 
 # ============================================================
-# HEALTH
+# HEALTH CHECK (USED BY RENDER / MONITORING)
 # ============================================================
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 # ============================================================
-# ROUTERS
+# REGISTER ROUTERS
 # ============================================================
 app.include_router(sinta_emotional_tts_router)
