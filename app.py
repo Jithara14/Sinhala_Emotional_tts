@@ -37,7 +37,7 @@ openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # =====================================================
 app = FastAPI(
     title="Gemini Emotion → OpenAI TTS API",
-    version="1.0.0",
+    version="1.0.1",
     description="Sinhala & Tamil emotion classification using Gemini and expressive TTS using OpenAI"
 )
 
@@ -148,7 +148,8 @@ async def classify_emotion_tts(text: str = Form(...)):
     return {
         "success": True,
         "emotion_result": gemini_result,
-        "audio_url": f"/audio/{audio_file}"
+        "audio_filename": audio_file,          # ✅ added (important)
+        "audio_url": f"/audio/{audio_file}"    # ✅ clean URL
     }
 
 # =====================================================
