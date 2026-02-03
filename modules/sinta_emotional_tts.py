@@ -2,12 +2,11 @@
 #  ONE FASTAPI BACKEND FOR SINHALA + TAMIL EMOTION + TTS
 ###############################################################
 
-
 import os
 import re
-import json
 import emoji
 import torch
+import anyio
 from uuid import uuid4
 from dotenv import load_dotenv
 from fastapi import APIRouter, Form
@@ -15,33 +14,21 @@ from fastapi.responses import JSONResponse, FileResponse
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from openai import OpenAI
 
+# ============================================================
+# CPU ONLY (RENDER SAFE)
+# ============================================================
+DEVICE = torch.device("cpu")
 torch.set_num_threads(1)
 
-# ============================================
+# ============================================================
 # LOAD ENV
-# ============================================
+# ============================================================
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# ============================================
-# COMMON CLEAN TEXT FUNCTION
-# ============================================
-def clean_text(text: str, lang: str):
-    text = emoji.demojize(str(text))
-    text = re.sub(r"http\S+|www\S+", "", text)
-
-    if lang == "si":
-        text = re.sub(r"[^0-9A-Za-z\u0D80-\u0DFF.,!?\s]", " ", text)
-    else:
-        text = re.sub(r"[^0-9A-Za-z\u0B80-\u0BFF.,!?\s]", " ", text)
-
-    return re.sub(r"\s+", " ", text).strip()
-
-# ================================================================
-# CONSTANTS
-# ================================================================
+# ============================================================
+# CONSTANTS (UNCHANGED)
+# ============================================================
 SINHALA_MODEL_DIR = "jithara/sinbert_sinhala_best"
 TAMIL_MODEL_DIR = "jithara/best_emotion_model"
 
@@ -54,56 +41,55 @@ TAMIL_TTS_DIR = "tts_outputs"
 os.makedirs(SINHALA_TTS_DIR, exist_ok=True)
 os.makedirs(TAMIL_TTS_DIR, exist_ok=True)
 
-# ================================================================
-# GLOBAL MODEL HOLDERS (LAZY LOADING)
-# ================================================================
+# ============================================================
+# GLOBAL MODELS (PERSISTENT)
+# ============================================================
 si_tokenizer = None
 si_model = None
+si_id2label = None
+
 ta_tokenizer = None
 ta_model = None
-si_id2label = None
 ta_id2label = None
 
-# ================================================================
-# LAZY MODEL LOADER (FIXED ✅)
-# ================================================================
-def load_models(lang: str):
-    global si_tokenizer, si_model, ta_tokenizer, ta_model, si_id2label, ta_id2label
+# ============================================================
+# CLEAN TEXT (UNCHANGED)
+# ============================================================
+def clean_text(text: str, lang: str):
+    text = emoji.demojize(str(text))
+    text = re.sub(r"http\S+|www\S+", "", text)
 
     if lang == "si":
-        if si_model is None:
-            print("📌 Loading Sinhala model...")
-            si_tokenizer = AutoTokenizer.from_pretrained(SINHALA_MODEL_DIR)
-            si_model = AutoModelForSequenceClassification.from_pretrained(
-                SINHALA_MODEL_DIR
-            ).to(DEVICE).eval()
-            si_id2label = si_model.config.id2label
-
-        # 🔥 FREE Tamil model
-        ta_model = None
-        ta_tokenizer = None
-        ta_id2label = None
-        torch.cuda.empty_cache()
-
+        text = re.sub(r"[^0-9A-Za-z\u0D80-\u0DFF.,!?\s]", " ", text)
     else:
-        if ta_model is None:
-            print("📌 Loading Tamil model...")
-            ta_tokenizer = AutoTokenizer.from_pretrained(TAMIL_MODEL_DIR)
-            ta_model = AutoModelForSequenceClassification.from_pretrained(
-                TAMIL_MODEL_DIR
-            ).to(DEVICE).eval()
-            ta_id2label = ta_model.config.id2label
+        text = re.sub(r"[^0-9A-Za-z\u0B80-\u0BFF.,!?\s]", " ", text)
 
-        # 🔥 FREE Sinhala model
-        si_model = None
-        si_tokenizer = None
-        si_id2label = None
-        torch.cuda.empty_cache()
+    return re.sub(r"\s+", " ", text).strip()
 
+# ============================================================
+# STARTUP MODEL LOADER (RENDER FIX)
+# ============================================================
+def preload_models():
+    global si_tokenizer, si_model, si_id2label
+    global ta_tokenizer, ta_model, ta_id2label
 
-# ================================================================
-# EMOTION META (UNCHANGED)
-# ================================================================
+    print("📌 Loading Sinhala model...")
+    si_tokenizer = AutoTokenizer.from_pretrained(SINHALA_MODEL_DIR)
+    si_model = AutoModelForSequenceClassification.from_pretrained(
+        SINHALA_MODEL_DIR
+    ).to(DEVICE).eval()
+    si_id2label = si_model.config.id2label
+
+    print("📌 Loading Tamil model...")
+    ta_tokenizer = AutoTokenizer.from_pretrained(TAMIL_MODEL_DIR)
+    ta_model = AutoModelForSequenceClassification.from_pretrained(
+        TAMIL_MODEL_DIR
+    ).to(DEVICE).eval()
+    ta_id2label = ta_model.config.id2label
+
+# ============================================================
+# EMOTION META (100% UNCHANGED)
+# ============================================================
 SI_EMOTION_META = {
     "happy": {
         "voice_affect": "Warm, cheerful, bright emotional color with genuine joy and a natural smile in the voice",
@@ -157,27 +143,20 @@ SI_EMOTION_META = {
 
 TA_EMOTION_META = SI_EMOTION_META
 
-# ================================================================
-# PREDICT EMOTION (UNCHANGED LOGIC)
-# ================================================================
+# ============================================================
+# PREDICT EMOTION (LOGIC UNCHANGED)
+# ============================================================
 def predict_emotion(text, lang):
-    load_models(lang)   # ✅ FIX HERE
     cleaned = clean_text(text, lang)
 
     if lang == "si":
-        tokenizer = si_tokenizer
-        model = si_model
-        max_len = SINHALA_MAX_LEN
-        label_map = si_id2label
-        meta_map = SI_EMOTION_META
+        tokenizer, model, label_map, meta_map, max_len = (
+            si_tokenizer, si_model, si_id2label, SI_EMOTION_META, SINHALA_MAX_LEN
+        )
     else:
-        tokenizer = ta_tokenizer
-        model = ta_model
-        max_len = TAMIL_MAX_LEN
-        label_map = ta_id2label
-        meta_map = TA_EMOTION_META
-    
-
+        tokenizer, model, label_map, meta_map, max_len = (
+            ta_tokenizer, ta_model, ta_id2label, TA_EMOTION_META, TAMIL_MAX_LEN
+        )
 
     enc = tokenizer(
         cleaned,
@@ -189,16 +168,14 @@ def predict_emotion(text, lang):
 
     with torch.no_grad():
         logits = model(
-            input_ids=enc["input_ids"].to(DEVICE),
-            attention_mask=enc["attention_mask"].to(DEVICE)
+            input_ids=enc["input_ids"],
+            attention_mask=enc["attention_mask"]
         ).logits
 
     pred_id = torch.argmax(logits, dim=1).item()
+    raw_emotion = label_map[pred_id].strip().lower()
 
-    raw_emotion = label_map[pred_id] if isinstance(label_map, dict) else label_map[pred_id]
-    raw_emotion = raw_emotion.strip().lower()
-
-    emotion_key_map = {
+    emotion = {
         "anger": "anger",
         "ang": "anger",
         "fear": "fear",
@@ -208,19 +185,17 @@ def predict_emotion(text, lang):
         "happy": "happy",
         "surprise": "surprise",
         "neutral": "neutral"
-    }
+    }.get(raw_emotion, "neutral")
 
-    emotion = emotion_key_map.get(raw_emotion, "neutral")
-    meta = meta_map[emotion]
+    meta = meta_map[emotion].copy()
     meta["emotion_name"] = emotion
 
     return {"text": text, "emotion": emotion, **meta}
 
-
-# ================================================================
-# TTS (UNCHANGED)
-# ================================================================
-def generate_tts(text, meta, lang):
+# ============================================================
+# TTS (THREAD SAFE – LOGIC UNCHANGED)
+# ============================================================
+def _tts_sync(text, meta, lang):
     instructions = (
         f"Affect: {meta['voice_affect']}\n"
         f"Tone: {meta['tone']}\n"
@@ -239,10 +214,6 @@ def generate_tts(text, meta, lang):
 
     filename = f"{uuid4().hex}.wav"
     folder = SINHALA_TTS_DIR if lang == "si" else TAMIL_TTS_DIR
-
-    # ✅ CRITICAL FIX
-    os.makedirs(folder, exist_ok=True)
-
     path = os.path.join(folder, filename)
 
     with open(path, "wb") as f:
@@ -250,11 +221,12 @@ def generate_tts(text, meta, lang):
 
     return filename
 
+async def generate_tts(text, meta, lang):
+    return await anyio.to_thread.run_sync(_tts_sync, text, meta, lang)
 
-
-# ================================================================
+# ============================================================
 # ROUTES (UNCHANGED)
-# ================================================================
+# ============================================================
 router = APIRouter()
 
 @router.post("/sinhala/predict-emotion")
@@ -264,7 +236,7 @@ async def sinhala_predict(text: str = Form(...)):
 @router.post("/sinhala/predict-emotion-tts")
 async def sinhala_predict_tts(text: str = Form(...)):
     result = predict_emotion(text, "si")
-    audio = generate_tts(result["text"], result, "si")
+    audio = await generate_tts(result["text"], result, "si")
     return {"success": True, "classification": result, "audio_url": f"/audio/sinhala/{audio}"}
 
 @router.get("/audio/sinhala/{filename}")
@@ -278,7 +250,7 @@ async def tamil_predict(text: str = Form(...)):
 @router.post("/tamil/predict-emotion-tts")
 async def tamil_predict_tts(text: str = Form(...)):
     result = predict_emotion(text, "ta")
-    audio = generate_tts(result["text"], result, "ta")
+    audio = await generate_tts(result["text"], result, "ta")
     return {"success": True, "classification": result, "audio_url": f"/audio/tamil/{audio}"}
 
 @router.get("/audio/tamil/{filename}")
