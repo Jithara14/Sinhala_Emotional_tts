@@ -37,8 +37,8 @@ openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # =====================================================
 app = FastAPI(
     title="Gemini Emotion → OpenAI TTS API",
-    version="1.0.1",
-    description="Sinhala & Tamil emotion classification using Gemini and expressive TTS using OpenAI"
+    version="2.0.0",
+    description="Sinhala & Tamil emotion classification using Gemini and expressive TTS using OpenAI (MP3 Stable)"
 )
 
 # =====================================================
@@ -75,7 +75,7 @@ def parse_gemini_json(response_text: str):
             except Exception:
                 pass
 
-    return {"text": cleaned, "emotion": "unknown"}
+    return {"text": cleaned, "emotion": "neutral"}
 
 # =====================================================
 # 7️⃣ Gemini Emotion Classifier
@@ -105,10 +105,10 @@ Sentence: "{text}"
     return parse_gemini_json(response.text)
 
 # =====================================================
-# 8️⃣ OpenAI TTS (ASYNC + STREAMING)
+# 8️⃣ OpenAI TTS (MP3 Streaming - FIXED)
 # =====================================================
 async def generate_tts_audio(text, instructions):
-    filename = f"{uuid.uuid4().hex}.wav"
+    filename = f"{uuid.uuid4().hex}.mp3"   # ✅ MP3 instead of WAV
     output_path = os.path.join(TTS_DIR, filename)
 
     async with openai.audio.speech.with_streaming_response.create(
@@ -116,8 +116,9 @@ async def generate_tts_audio(text, instructions):
         voice="ballad",
         input=text,
         instructions=instructions,
-        response_format="wav",
+        response_format="mp3",   # ✅ IMPORTANT CHANGE
     ) as response:
+
         with open(output_path, "wb") as f:
             async for chunk in response.iter_bytes():
                 f.write(chunk)
@@ -148,19 +149,23 @@ async def classify_emotion_tts(text: str = Form(...)):
     return {
         "success": True,
         "emotion_result": gemini_result,
-        "audio_filename": audio_file,          # ✅ added (important)
-        "audio_url": f"/audio/{audio_file}"    # ✅ clean URL
+        "audio_url": f"/audio/{audio_file}"
     }
 
 # =====================================================
-# 🔟 Audio serving
+# 🔟 Audio serving (Correct Media Type)
 # =====================================================
 @app.get("/audio/{filename}")
 async def serve_audio(filename: str):
     path = os.path.join(TTS_DIR, filename)
     if not os.path.exists(path):
         return JSONResponse({"error": "File not found"}, status_code=404)
-    return FileResponse(path, media_type="audio/wav")
+
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",  # ✅ Correct for MP3
+        filename=filename
+    )
 
 # =====================================================
 # 11️⃣ Root + Health
@@ -168,7 +173,7 @@ async def serve_audio(filename: str):
 @app.get("/")
 def root():
     return {
-        "message": "Gemini Emotion → OpenAI TTS API is running",
+        "message": "Gemini Emotion → OpenAI TTS API is running (MP3 Stable)",
         "docs": "/docs",
         "health": "/health"
     }
