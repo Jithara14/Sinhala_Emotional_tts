@@ -133,7 +133,6 @@ async def classify_emotion_tts(text: str = Form(...)):
     gemini_result = classify_emotion(text)
 
     # Extract only emotion label
-    emotion_label = gemini_result.get("emotion", "neutral")
 
     tts_instructions = (
         f"Affect: {gemini_result.get('voice_affect','')}\n"
@@ -151,7 +150,7 @@ async def classify_emotion_tts(text: str = Form(...)):
 
     return {
         "success": True,
-        "emotion": emotion_label,
+        "emotion_result": gemini_result, 
         "audio_url": f"/audio/{audio_file}"
     }
 
