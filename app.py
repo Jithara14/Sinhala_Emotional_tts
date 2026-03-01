@@ -173,7 +173,7 @@ async def serve_audio(filename: str):
 @app.get("/")
 def root():
     return {
-        "message": "Gemini Emotion → OpenAI TTS API is running (MP3 Stable)",
+        "message": "Emotion → TTS API is running (MP3 Stable)",
         "docs": "/docs",
         "health": "/health"
     }
