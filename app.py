@@ -6,7 +6,6 @@ from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from dotenv import load_dotenv
-import google.generativeai as genai
 from openai import AsyncOpenAI
 
 # =====================================================
@@ -14,31 +13,23 @@ from openai import AsyncOpenAI
 # =====================================================
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not GEMINI_API_KEY or not GEMINI_MODEL:
-    raise ValueError("❌ Missing GEMINI_API_KEY or GEMINI_MODEL in .env")
 
 if not OPENAI_API_KEY:
     raise ValueError("❌ Missing OPENAI_API_KEY in .env")
 
 # =====================================================
-# 2️⃣ Configure APIs
+# 2️⃣ Configure OpenAI
 # =====================================================
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-
 openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # =====================================================
 # 3️⃣ Create FastAPI App
 # =====================================================
 app = FastAPI(
-    title="Gemini Emotion → OpenAI TTS API",
+    title="OpenAI Emotion → OpenAI TTS API",
     version="2.0.0",
-    description="Sinhala & Tamil emotion classification using Gemini and expressive TTS using OpenAI (MP3 Stable)"
+    description="Sinhala & Tamil emotion classification using OpenAI and expressive TTS using OpenAI (MP3 Stable)"
 )
 
 # =====================================================
@@ -57,11 +48,8 @@ app.add_middleware(
 TTS_DIR = "tts_outputs"
 os.makedirs(TTS_DIR, exist_ok=True)
 
-
-
-
 # =====================================================
-# 6️⃣ Emotion Metadata (YOUR DATA)
+# 6️⃣ Emotion Metadata
 # =====================================================
 EMOTION_META = {
 
@@ -121,29 +109,9 @@ EMOTION_META = {
 }
 
 # =====================================================
-# 6️⃣ Helper: Safe JSON Parsing for Gemini
+# 7️⃣ OpenAI Emotion Classifier
 # =====================================================
-def parse_gemini_json(response_text: str):
-    cleaned = re.sub(r'```(?:json)?', '', response_text, flags=re.I)
-    cleaned = cleaned.strip('`\n ')
-    cleaned = re.sub(r'""(.*)""', r'"\1"', cleaned)
-
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        match = re.search(r'\{.*\}', cleaned, flags=re.S)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                pass
-
-    return {"text": cleaned, "emotion": "neutral"}
-
-# =====================================================
-# 7️⃣ Gemini Emotion Classifier
-# =====================================================
-def classify_emotion(text: str):
+async def classify_emotion(text: str):
 
     prompt = f"""
 You are an expert Sinhala and Tamil emotion classifier.
@@ -157,12 +125,23 @@ Return ONLY JSON:
 "text": "{text}",
 "emotion": "<one_of:[happy,sad,fear,anger,surprise,neutral]>"
 }}
-
-Sentence: "{text}"
 """
 
-    response = gemini_model.generate_content(prompt)
-    result = parse_gemini_json(response.text)
+    response = await openai.chat.completions.create(
+        model="gpt-4o-mini",
+        temperature=0,
+        messages=[
+            {"role": "system", "content": "You classify emotions in Sinhala and Tamil sentences."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    content = response.choices[0].message.content
+
+    try:
+        result = json.loads(content)
+    except:
+        result = {"text": text, "emotion": "neutral"}
 
     emotion = result.get("emotion", "neutral").lower()
 
@@ -178,10 +157,10 @@ Sentence: "{text}"
     }
 
 # =====================================================
-# 8️⃣ OpenAI TTS (MP3 Streaming - FIXED)
+# 8️⃣ OpenAI TTS (MP3 Streaming)
 # =====================================================
 async def generate_tts_audio(text, instructions):
-    filename = f"{uuid.uuid4().hex}.mp3"   # ✅ MP3 instead of WAV
+    filename = f"{uuid.uuid4().hex}.mp3"
     output_path = os.path.join(TTS_DIR, filename)
 
     async with openai.audio.speech.with_streaming_response.create(
@@ -189,7 +168,7 @@ async def generate_tts_audio(text, instructions):
         voice="ballad",
         input=text,
         instructions=instructions,
-        response_format="mp3",   # ✅ IMPORTANT CHANGE
+        response_format="mp3",
     ) as response:
 
         with open(output_path, "wb") as f:
@@ -199,46 +178,46 @@ async def generate_tts_audio(text, instructions):
     return filename
 
 # =====================================================
-# 9️⃣ API: Gemini → OpenAI TTS
+# 9️⃣ API: Emotion → TTS
 # =====================================================
 @app.post("/classify-emotion-tts")
 async def classify_emotion_tts(text: str = Form(...)):
-    gemini_result = classify_emotion(text)
 
-    # Extract only emotion label
+    emotion_result = await classify_emotion(text)
 
     tts_instructions = (
-        f"Affect: {gemini_result.get('voice_affect','')}\n"
-        f"Tone: {gemini_result.get('tone','')}\n"
-        f"Pacing: {gemini_result.get('pacing','')}\n"
-        f"Personality: {gemini_result.get('personality','')}\n"
-        f"Pauses: {gemini_result.get('pauses','')}\n"
-        f"Emotion: {gemini_result.get('emotion_description','')}"
+        f"Affect: {emotion_result.get('voice_affect','')}\n"
+        f"Tone: {emotion_result.get('tone','')}\n"
+        f"Pacing: {emotion_result.get('pacing','')}\n"
+        f"Personality: {emotion_result.get('personality','')}\n"
+        f"Pauses: {emotion_result.get('pauses','')}\n"
+        f"Emotion: {emotion_result.get('emotion_description','')}"
     )
 
     audio_file = await generate_tts_audio(
-        gemini_result.get("text", text),
+        emotion_result.get("text", text),
         tts_instructions
     )
 
     return {
         "success": True,
-        "emotion_result": gemini_result, 
+        "emotion_result": emotion_result,
         "audio_url": f"/audio/{audio_file}"
     }
 
 # =====================================================
-# 🔟 Audio serving (Correct Media Type)
+# 🔟 Audio serving
 # =====================================================
 @app.get("/audio/{filename}")
 async def serve_audio(filename: str):
     path = os.path.join(TTS_DIR, filename)
+
     if not os.path.exists(path):
         return JSONResponse({"error": "File not found"}, status_code=404)
 
     return FileResponse(
         path,
-        media_type="audio/mpeg",  # ✅ Correct for MP3
+        media_type="audio/mpeg",
         filename=filename
     )
 
