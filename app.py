@@ -1,6 +1,4 @@
 import os
-import re
-import json
 import uuid
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,9 +25,9 @@ openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # 3️⃣ Create FastAPI App
 # =====================================================
 app = FastAPI(
-    title="OpenAI Emotion → OpenAI TTS API",
-    version="2.0.0",
-    description="Sinhala & Tamil emotion classification using OpenAI and expressive TTS using OpenAI (MP3 Stable)"
+    title="Fast Emotion → OpenAI TTS API",
+    version="3.0.0",
+    description="Fast Sinhala & Tamil emotion detection with expressive TTS"
 )
 
 # =====================================================
@@ -109,43 +107,28 @@ EMOTION_META = {
 }
 
 # =====================================================
-# 7️⃣ OpenAI Emotion Classifier
+# 7️⃣ FAST Emotion Detection (Instant)
 # =====================================================
 async def classify_emotion(text: str):
 
-    prompt = f"""
-You are an expert Sinhala and Tamil emotion classifier.
+    t = text.lower()
 
-Emotion classes:
-happy, sad, fear, anger, surprise, neutral.
+    if any(w in t for w in ["සතුට", "happy", "joy", "great", "wonderful"]):
+        emotion = "happy"
 
-Return ONLY JSON:
+    elif any(w in t for w in ["දුක", "sad", "cry", "hurt"]):
+        emotion = "sad"
 
-{{
-"text": "{text}",
-"emotion": "<one_of:[happy,sad,fear,anger,surprise,neutral]>"
-}}
-"""
+    elif any(w in t for w in ["බය", "fear", "afraid", "scared"]):
+        emotion = "fear"
 
-    response = await openai.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": "You classify emotions in Sinhala and Tamil sentences."},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    elif any(w in t for w in ["කෝප", "anger", "angry", "mad"]):
+        emotion = "anger"
 
-    content = response.choices[0].message.content
+    elif any(w in t for w in ["wow", "surprise", "unexpected"]):
+        emotion = "surprise"
 
-    try:
-        result = json.loads(content)
-    except:
-        result = {"text": text, "emotion": "neutral"}
-
-    emotion = result.get("emotion", "neutral").lower()
-
-    if emotion not in EMOTION_META:
+    else:
         emotion = "neutral"
 
     meta = EMOTION_META[emotion]
@@ -157,9 +140,10 @@ Return ONLY JSON:
     }
 
 # =====================================================
-# 8️⃣ OpenAI TTS (MP3 Streaming)
+# 8️⃣ OpenAI TTS
 # =====================================================
 async def generate_tts_audio(text, instructions):
+
     filename = f"{uuid.uuid4().hex}.mp3"
     output_path = os.path.join(TTS_DIR, filename)
 
@@ -168,7 +152,7 @@ async def generate_tts_audio(text, instructions):
         voice="ballad",
         input=text,
         instructions=instructions,
-        response_format="mp3",
+        format="mp3"
     ) as response:
 
         with open(output_path, "wb") as f:
@@ -178,7 +162,7 @@ async def generate_tts_audio(text, instructions):
     return filename
 
 # =====================================================
-# 9️⃣ API: Emotion → TTS
+# 9️⃣ API Endpoint
 # =====================================================
 @app.post("/classify-emotion-tts")
 async def classify_emotion_tts(text: str = Form(...)):
@@ -206,10 +190,11 @@ async def classify_emotion_tts(text: str = Form(...)):
     }
 
 # =====================================================
-# 🔟 Audio serving
+# 🔟 Serve Audio
 # =====================================================
 @app.get("/audio/{filename}")
 async def serve_audio(filename: str):
+
     path = os.path.join(TTS_DIR, filename)
 
     if not os.path.exists(path):
@@ -227,7 +212,7 @@ async def serve_audio(filename: str):
 @app.get("/")
 def root():
     return {
-        "message": "Emotion → TTS API is running (MP3 Stable)",
+        "message": "Fast Emotion → TTS API running",
         "docs": "/docs",
         "health": "/health"
     }
